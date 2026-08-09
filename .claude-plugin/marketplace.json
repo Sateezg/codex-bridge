@@ -1,6 +1,8 @@
 {
   "name": "codex-bridge",
-  "description": "Image generation and GPT-5 subagents for Claude Code, powered by your existing Codex CLI login.",
+  "metadata": {
+    "description": "Image generation and GPT-5 subagents for Claude Code, powered by your existing Codex CLI login."
+  },
   "owner": {
     "name": "Sateezg",
     "url": "https://github.com/Sateezg"
