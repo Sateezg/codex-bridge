@@ -228,7 +228,6 @@ bash -n bin/codex-imagegen && bash -n bin/codex-run
 ## Credits
 
 - [openai/codex](https://github.com/openai/codex) — the Codex CLI and its `$imagegen` skill
-- [oakplank/gpt-image-bridge](https://github.com/oakplank/gpt-image-bridge) — the original codex-CLI image bridge idea
 - [Codex CLI image generation write-up](https://codex.danielvaughan.com/2026/04/27/codex-cli-image-generation-gpt-image-2-visual-development-workflows/)
 
 ## License
