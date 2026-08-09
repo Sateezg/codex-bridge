@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
-# codex-imagegen — generate an image with OpenAI gpt-image-2 through the Codex CLI,
-# using your existing `codex login` (ChatGPT plan). No OPENAI_API_KEY required.
+# codex-imagegen — generate or edit an image with OpenAI gpt-image-2 through the
+# Codex CLI, using your existing `codex login` (ChatGPT plan). No API key needed.
 #
 # Usage:
-#   codex-imagegen "<prompt>" <output-path.png> [--size WxH] [--model MODEL]
+#   codex-imagegen "<prompt>" <output.png> [options]
+#
+# Options:
+#   --size WxH        1024x1024 (default) | 1536x1024 | 1024x1536 | up to 2048x2048
+#   --ref <file>      Source/reference image. Repeatable (max 4). Passing a --ref
+#                     turns this into an EDIT: describe the change in the prompt.
+#   --model <name>    Model override passed to codex
+#   --timeout <sec>   Abort after N seconds (default: 600)
 #
 # Examples:
-#   codex-imagegen "flat vector icon of a rocket, blue gradient" ./assets/rocket.png
-#   codex-imagegen "photorealistic mountain lake at dawn" /tmp/lake.png --size 1536x1024
+#   codex-imagegen "flat vector rocket icon, blue #2563EB, minimal" ./rocket.png
+#   codex-imagegen "make the sky sunset orange, keep everything else identical" \
+#       ./out.png --ref ./original.png
 #
-# Exit codes: 0 = image written, 1 = usage/precondition error, 2 = generation failed.
+# Output: absolute path of the written PNG on stdout.
+# Exit:   0 ok | 1 usage/precondition | 2 generation failed | 124 timed out.
 
-set -euo pipefail
+set -uo pipefail
 
 err() { printf 'codex-imagegen: %s\n' "$*" >&2; }
 
@@ -19,7 +28,7 @@ err() { printf 'codex-imagegen: %s\n' "$*" >&2; }
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -29,11 +38,15 @@ PROMPT="$1"; shift
 OUTPUT="$1"; shift
 SIZE=""
 MODEL=""
+TIMEOUT=600
+REFS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --size)  SIZE="${2:-}"; shift 2 ;;
-    --model) MODEL="${2:-}"; shift 2 ;;
+    --size)    SIZE="${2:-}"; shift 2 ;;
+    --model)   MODEL="${2:-}"; shift 2 ;;
+    --timeout) TIMEOUT="${2:-}"; shift 2 ;;
+    --ref)     REFS+=("${2:-}"); shift 2 ;;
     -h|--help) usage ;;
     *) err "unknown argument: $1"; usage ;;
   esac
@@ -42,21 +55,34 @@ done
 [ -n "$PROMPT" ] || { err "prompt is empty"; exit 1; }
 [ -n "$OUTPUT" ] || { err "output path is empty"; exit 1; }
 
+if [ "${#REFS[@]}" -gt 4 ]; then
+  err "at most 4 --ref images are supported (got ${#REFS[@]})"
+  exit 1
+fi
+
 # --- Preconditions -----------------------------------------------------------
 if ! command -v codex >/dev/null 2>&1; then
-  err "codex CLI not found on PATH. Install it (e.g. 'npm i -g @openai/codex' or 'brew install codex') and run 'codex login'."
+  err "codex CLI not found on PATH. Install it ('npm i -g @openai/codex' or 'brew install codex') then run 'codex login'."
   exit 1
 fi
 
 if ! codex login status 2>/dev/null | grep -qi 'logged in'; then
-  err "codex is not logged in. Run 'codex login' first (ChatGPT Plus/Pro/Team plan works; no API key needed)."
+  err "codex is not logged in. Run 'codex login' in a terminal, then retry. (ChatGPT Plus/Pro/Team works; no API key needed.)"
   exit 1
 fi
 
+for r in "${REFS[@]:-}"; do
+  [ -n "$r" ] || continue
+  if [ ! -f "$r" ]; then
+    err "reference image not found: $r"
+    exit 1
+  fi
+done
+
 # --- Resolve output path -----------------------------------------------------
 case "$OUTPUT" in
-  /*) : ;;                       # already absolute
-  *)  OUTPUT="$(pwd)/$OUTPUT" ;; # make absolute against caller's cwd
+  /*) : ;;
+  *)  OUTPUT="$(pwd)/$OUTPUT" ;;
 esac
 
 OUTDIR="$(dirname "$OUTPUT")"
@@ -65,26 +91,49 @@ mkdir -p "$OUTDIR"
 OUTDIR="$(cd "$OUTDIR" && pwd)"   # normalize (collapse ./ and symlinked segments)
 OUTPUT="$OUTDIR/$BASENAME"
 
-# --- Build the instruction for Codex ----------------------------------------
+# --- Build the instruction for Codex -----------------------------------------
 # Note: \$imagegen must reach Codex literally — it names Codex's built-in
 # image-generation skill.
-INSTRUCTION="Use the \$imagegen image generation tool to generate exactly one image and save it to ./${BASENAME} in the current working directory, overwriting any existing file. Do nothing else: no code changes, no extra files, no questions. Image description: ${PROMPT}"
+if [ "${#REFS[@]}" -gt 0 ]; then
+  INSTRUCTION="Use the \$imagegen image generation tool to edit the attached reference image(s) and save the result to ./${BASENAME} in the current working directory, overwriting any existing file. Preserve everything not mentioned in the change description. Do nothing else: no code changes, no extra files, no questions. Change to make: ${PROMPT}"
+else
+  INSTRUCTION="Use the \$imagegen image generation tool to generate exactly one image and save it to ./${BASENAME} in the current working directory, overwriting any existing file. Do nothing else: no code changes, no extra files, no questions. Image description: ${PROMPT}"
+fi
 if [ -n "$SIZE" ]; then
   INSTRUCTION="${INSTRUCTION} Desired image size: ${SIZE}."
 fi
 
-MODEL_ARGS=()
-if [ -n "$MODEL" ]; then
-  MODEL_ARGS=(-m "$MODEL")
-fi
+CMD=(codex exec -C "$OUTDIR" -s workspace-write --skip-git-repo-check)
+[ -n "$MODEL" ] && CMD+=(-m "$MODEL")
+for r in "${REFS[@]:-}"; do
+  [ -n "$r" ] || continue
+  case "$r" in /*) ABS="$r" ;; *) ABS="$(cd "$(dirname "$r")" && pwd)/$(basename "$r")" ;; esac
+  CMD+=(-i "$ABS")
+done
+CMD+=("$INSTRUCTION")
 
 START_EPOCH="$(date +%s)"
 
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="gtimeout"
+fi
+
 # --- Run Codex non-interactively ---------------------------------------------
-set +e
-CODEX_OUT="$(codex exec -C "$OUTDIR" -s workspace-write --skip-git-repo-check "${MODEL_ARGS[@]}" "$INSTRUCTION" 2>&1)"
-CODEX_STATUS=$?
-set -e
+if [ -n "$TIMEOUT_BIN" ]; then
+  CODEX_OUT="$("$TIMEOUT_BIN" "$TIMEOUT" "${CMD[@]}" 2>&1)"
+  CODEX_STATUS=$?
+else
+  CODEX_OUT="$("${CMD[@]}" 2>&1)"
+  CODEX_STATUS=$?
+fi
+
+if [ "$CODEX_STATUS" -eq 124 ]; then
+  err "timed out after ${TIMEOUT}s. Raise --timeout or simplify the prompt."
+  exit 124
+fi
 
 # --- Verify the file landed where we asked -----------------------------------
 if [ -s "$OUTPUT" ]; then

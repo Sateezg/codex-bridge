@@ -1,132 +1,226 @@
+<div align="center">
+
 # codex-bridge
 
-A [Claude Code](https://claude.com/claude-code) plugin that lets Claude use your **existing Codex CLI (ChatGPT) login** — no OpenAI API key — for two things:
+**Give Claude Code image generation and a team of GPT-5 subagents — using the Codex CLI login you already have.**
 
-1. **Image generation** — Claude produces real image files (icons, logos, banners, illustrations, photos) with OpenAI **gpt-image-2**, by driving the Codex CLI's built-in `$imagegen` skill. It triggers automatically whenever a task needs an image, and there's a `codex-artist` subagent for bigger jobs.
-2. **Second opinions** — a `codex-second-opinion` subagent that hands any coding question, review, or debugging task to Codex (GPT-5 family) and reports back its answer.
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![No API key required](https://img.shields.io/badge/OpenAI%20API%20key-not%20required-brightgreen)](#why-no-api-key)
 
-Both run on your ChatGPT plan quota rather than API billing.
+</div>
 
-## Prerequisites
+Claude Code can't generate images, and everything it does runs on your Claude quota. The Codex CLI can generate images with **gpt-image-2**, and runs on your **ChatGPT plan** — a completely separate budget. This plugin bridges the two.
 
-- **Codex CLI** installed: `npm i -g @openai/codex` (or `brew install codex`)
-- **Logged in with a ChatGPT plan** (Plus / Pro / Team): run `codex login`, then verify with `codex login status` → should say `Logged in using ChatGPT`
-- **Claude Code** installed
+Two things you get:
+
+**1. Claude can produce images.** Ask for an icon, a mockup, a hero image, a full favicon set — Claude writes the prompt, drives gpt-image-2 through Codex, then *looks at the result* and regenerates if it missed.
+
+**2. Claude can delegate to GPT-5.** Four Codex-powered subagents handle review, debugging, bulk implementation, and image work. Claude stays the orchestrator: it scopes the task, Codex does the volume, Claude verifies the result. Heavy work runs on your ChatGPT quota and its intermediate output never enters your Claude context.
+
+<a id="why-no-api-key"></a>
+> **No OpenAI API key.** Everything routes through `codex login`, so it bills against your ChatGPT plan rather than API credits.
+
+## Contents
+
+- [Install](#install) · [Quickstart](#quickstart) · [What's inside](#whats-inside)
+- [Feature 1 — images](#feature-1--images) · [Feature 2 — GPT-5 subagents](#feature-2--gpt-5-subagents)
+- [How it works](#how-it-works) · [Limitations](#limitations) · [Troubleshooting](#troubleshooting)
 
 ## Install
 
-```bash
+**Prerequisites**
+
+| | |
+| :-- | :-- |
+| Codex CLI | `npm i -g @openai/codex` or `brew install codex` |
+| Logged in | `codex login` → verify with `codex login status` (should say *Logged in using ChatGPT*) |
+| ChatGPT plan | Plus, Pro, or Team |
+| Claude Code | any current version |
+
+**Then:**
+
+```
 /plugin marketplace add Sateezg/codex-bridge
 /plugin install codex-bridge@codex-bridge
 ```
 
-Then run `/reload-plugins` if Claude Code asks you to.
+Run `/reload-plugins` if Claude Code asks you to.
 
 <details>
 <summary>Other install methods</summary>
 
-**Try it for one session, without installing:**
+Try it for one session, no install:
 
 ```bash
 git clone https://github.com/Sateezg/codex-bridge.git
 claude --plugin-dir ./codex-bridge
 ```
 
-**Auto-load from your skills directory:**
+Auto-load from your skills directory:
 
 ```bash
 git clone https://github.com/Sateezg/codex-bridge.git ~/.claude/skills/codex-bridge
-chmod +x ~/.claude/skills/codex-bridge/bin/codex-imagegen
+chmod +x ~/.claude/skills/codex-bridge/bin/*
 ```
 
-It loads as `codex-bridge@skills-dir` on your next session.
+Loads as `codex-bridge@skills-dir` on your next session.
 
 </details>
 
-## Usage
+## Quickstart
 
-Ask for an image in plain language — the `generate-image` skill triggers on its own:
-
-> generate a hero image for the landing page and save it in assets/
-
-Invoke the skill explicitly:
+Nothing to configure. Just ask in plain language:
 
 ```
-/codex-bridge:generate-image a flat blue rocket icon → assets/rocket.png
+generate a hero image for the landing page, save it in assets/
+make the sky in assets/hero.png sunset orange, keep everything else
+set up favicons and an OG card for this project
+review my changes before I commit
+ask codex why this test only fails under --parallel
+rename useSession to useAuthSession across the whole repo
 ```
 
-Delegate a batch to the subagent:
+The last one is the interesting case. Claude notices it's mechanical work across many files and offers the split before starting:
 
-> use codex-artist to generate the 6 sidebar icons in a consistent flat style
-
-Get a cross-check from Codex:
-
-> ask codex-second-opinion to review the auth changes in src/auth/
-
-You can also run the wrapper directly from a shell:
-
-```bash
-codex-imagegen "flat vector icon of a rocket, blue #2563EB, minimal, centered" ./rocket.png --size 1024x1024
-```
+> This touches 34 files with the same change. I can hand the edits to Codex — runs on your ChatGPT quota and keeps 34 file dumps out of this context — then review its diff here. Want me to?
 
 ## What's inside
 
-| Component | Type | What it does |
+**Skills** — Claude picks these up automatically; you can also call them as `/codex-bridge:<name>`.
+
+| Skill | Fires when |
+| :-- | :-- |
+| `generate-image` | a task needs a new image that doesn't exist yet |
+| `edit-image` | you point at an image file and ask to change or restyle it |
+| `asset-set` | favicons, app icons, OG cards, or a matching icon family |
+| `ask-codex` | you want GPT-5's take on one question about this repo |
+| `codex-review` | "review my changes" — diff, branch, or module |
+| `codex-delegate` | a task is big or repetitive enough that delegating saves you tokens |
+
+**Subagents** — Claude launches these itself, or you can name them.
+
+| Subagent | Does | Can write files? |
 | :-- | :-- | :-- |
-| `generate-image` | Skill | Auto-triggers when Claude needs an image; teaches it prompt structure, sizes, and the transparency workaround |
-| `codex-artist` | Subagent | Batch image jobs — writes rich prompts, generates, visually verifies each PNG, retries misses |
-| `codex-second-opinion` | Subagent | Sends a task to Codex via `codex exec` (read-only sandbox by default) and reports its answer |
-| `codex-imagegen` | Executable | Bash wrapper on `PATH` while the plugin is enabled |
+| `codex-artist` | images, icon sets, style-matched asset families | images only |
+| `codex-reviewer` | review a diff, then verifies every finding against the code | no |
+| `codex-debugger` | root-cause a failure, proposes a patch | no |
+| `codex-implementer` | bulk mechanical edits and scaffolding | **yes** — after you agree |
+| `codex-second-opinion` | general independent opinion on an approach | no |
+
+**Executables** — on your `PATH` while the plugin is enabled, and usable straight from a shell.
+
+| | |
+| :-- | :-- |
+| `codex-imagegen` | generate or edit an image; prints the output path |
+| `codex-run` | run any task on Codex; prints only its final answer |
+
+## Feature 1 — images
+
+```bash
+codex-imagegen "flat vector rocket icon, #2563EB on white, 2px stroke, minimal" ./rocket.png
+codex-imagegen "change the sky to sunset orange, keep everything else identical" ./out.png --ref ./hero.png
+codex-imagegen "settings gear, same style as the reference" ./settings.png --ref ./home.png
+```
+
+| Option | |
+| :-- | :-- |
+| `--size WxH` | `1024x1024` (default), `1536x1024`, `1024x1536`; ≤2048x2048 stable |
+| `--ref <file>` | source or style reference, repeatable up to 4 — turns the call into an edit |
+| `--model <name>` | model override |
+| `--timeout <sec>` | default 600 |
+
+What makes this better than pasting prompts into a chat window: the skills teach Claude to pull your **actual palette** out of `tailwind.config.*` or your design tokens, to reuse one style contract across a whole set so the assets match, to derive size variants with ImageMagick instead of regenerating, and to **open the PNG and check it** before telling you it's done.
+
+## Feature 2 — GPT-5 subagents
+
+The point isn't "Claude can also call GPT-5". It's the division of labour: **Claude scopes and verifies, Codex does the volume.**
+
+```
+you ──▶ Claude          scopes the work, writes the brief, reviews the result
+             │
+             ▼
+        codex-run ──▶ Codex CLI ──▶ GPT-5 / gpt-image-2
+                                     (your ChatGPT quota)
+```
+
+Because Codex runs as a separate process, its intermediate output — the 40 files it read, the search results, the generated boilerplate — never enters your Claude context. You pay Claude tokens only for the brief and the review.
+
+**What gets delegated**, per the `codex-delegate` rubric: mechanical edits across many files, bulk generation, exhaustive repo sweeps, all image work, and self-contained subtasks. **What doesn't:** architecture calls, ambiguous requirements, anything needing the conversation history, and small edits — round-tripping a two-line fix costs *more*, not less.
+
+Every subagent follows the same contract: read-only by default, verify before reporting, and never claim success on unverified work. Only `codex-implementer` writes to your files, only after you've agreed, and only with a clean working tree so its changes land as a reviewable diff.
+
+Straight from a shell:
+
+```bash
+codex-run -C . "which module owns rate limiting? name the file"
+codex-run -C . -r "now show me the minimal patch"          # -r continues the session
+git diff main...HEAD | codex-run -C . --timeout 1200 -      # pipe a diff in
+```
+
+| Option | |
+| :-- | :-- |
+| `-C, --cd <dir>` | working directory (default: cwd) |
+| `-s, --sandbox <mode>` | `read-only` (default), `workspace-write`, `danger-full-access` |
+| `-m, --model <name>` | e.g. `gpt-5-codex` |
+| `-r, --resume` | continue the previous session instead of starting fresh |
+| `--schema <file>` | constrain the answer to a JSON Schema |
+| `--raw` | also dump Codex's event log to stderr |
+| `--timeout <sec>` | default 900 |
 
 ## How it works
 
-The wrapper (`bin/codex-imagegen`) runs:
+Both wrappers shell out to `codex exec`, Codex's non-interactive mode.
+
+**Images** run in a `workspace-write` sandbox scoped to the output directory:
 
 ```bash
-codex exec -C <output-dir> -s workspace-write --skip-git-repo-check \
-  "Use the \$imagegen image generation tool to generate ... save to ./<file>.png ..."
+codex exec -C <outdir> -s workspace-write --skip-git-repo-check [-i <ref>...] \
+  "Use the \$imagegen image generation tool to ... save to ./<file>.png ..."
 ```
 
-Codex's built-in `$imagegen` skill calls gpt-image-2 with your ChatGPT credentials and writes the PNG into the working directory. The wrapper then verifies the file landed — falling back to `$CODEX_HOME/generated_images/` if Codex saved it there instead — and prints the final absolute path so Claude can read the image back.
+`$imagegen` is Codex's built-in image skill; it calls gpt-image-2 with your ChatGPT credentials and writes the PNG into the working directory. The wrapper verifies the file landed — falling back to `$CODEX_HOME/generated_images/` if Codex saved it there instead — and prints the absolute path so Claude can read the image back.
 
-It fails loudly and early: missing `codex` binary or a logged-out session exits `1` with a clear message rather than hanging.
+**Text tasks** capture the final message with `-o` instead of scraping the event log, so subagents get a clean answer rather than a transcript:
 
-## Notes & limitations
-
-- Image turns consume your **ChatGPT plan quota** roughly 3–5× faster than text turns. For heavy batch use, set `OPENAI_API_KEY` in your environment and Codex switches to API billing instead.
-- gpt-image-2 does **not** support transparent backgrounds. The skill knows the workaround: generate on solid `#00FF00`, then `magick in.png -fuzz 8% -transparent '#00FF00' out.png`.
-- Sizes: `1024x1024` (default), `1536x1024` (landscape), `1024x1536` (portrait). Up to 2048×2048 is stable; 4K is beta.
-- Generation typically takes 1–4 minutes per image, so the skill instructs Claude to use a ≥5 minute Bash timeout.
-- macOS and Linux. The wrapper handles both BSD and GNU `stat`.
-
-## Structure
-
+```bash
+codex exec -C <dir> -s read-only --skip-git-repo-check -o <tmpfile> "<task>"
 ```
-codex-bridge/
-├── .claude-plugin/
-│   ├── plugin.json                 # plugin manifest
-│   └── marketplace.json            # lets this repo serve as its own marketplace
-├── bin/codex-imagegen              # bash wrapper around `codex exec` + $imagegen
-├── skills/generate-image/SKILL.md  # auto-invoked image generation skill
-├── agents/codex-artist.md          # image-generation subagent
-├── agents/codex-second-opinion.md  # delegate coding tasks/reviews to Codex
-├── LICENSE
-└── README.md
-```
+
+Both fail fast and loudly: a missing `codex` binary or a logged-out session exits `1` with an actionable message rather than hanging. Timeouts exit `124`. Both handle BSD and GNU `stat`, and degrade gracefully when `timeout`/`gtimeout` isn't installed.
+
+## Limitations
+
+- **Quota, not free.** Image turns burn ChatGPT plan quota roughly 3–5× faster than text turns. Set `OPENAI_API_KEY` and Codex switches to API billing instead.
+- **No transparent backgrounds** — gpt-image-2 doesn't support them. The skills use a chroma-key workaround: generate on solid `#00FF00`, then `magick in.png -fuzz 8% -transparent '#00FF00' out.png`.
+- **Slow.** 1–4 minutes per image; a repo-wide Codex task can take 10+ minutes. Skills set long Bash timeouts accordingly.
+- **Codex is blind to your conversation.** Every brief has to stand alone. This is exactly why the subagents verify before reporting.
+- **macOS and Linux.** Not tested on Windows.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| :-- | :-- |
+| `codex CLI not found on PATH` | install Codex CLI, then reopen your shell |
+| `codex is not logged in` | run `codex login`; confirm with `codex login status` |
+| `Operation not permitted` from codex | ownership on `~/.codex` — `sudo chown -R $(whoami) ~/.codex` |
+| Image lands somewhere unexpected | the wrapper checks `$CODEX_HOME/generated_images/`; pass an absolute output path |
+| Skills don't show up | `/reload-plugins`, then `/help` → Custom commands |
+| Wrapper "permission denied" | `chmod +x ~/.claude/skills/codex-bridge/bin/*` |
+| Everything times out | raise `--timeout`; check `codex exec -C . -s read-only "say hi"` works standalone |
 
 ## Contributing
 
-Issues and PRs welcome. Before opening a PR, run:
+Issues and PRs welcome.
 
 ```bash
 claude plugin validate .
-bash -n bin/codex-imagegen
+bash -n bin/codex-imagegen && bash -n bin/codex-run
 ```
 
-## Credits / prior art
+## Credits
 
 - [openai/codex](https://github.com/openai/codex) — the Codex CLI and its `$imagegen` skill
-- [oakplank/gpt-image-bridge](https://github.com/oakplank/gpt-image-bridge) — the original codex-CLI image bridge idea
 - [Codex CLI image generation write-up](https://codex.danielvaughan.com/2026/04/27/codex-cli-image-generation-gpt-image-2-visual-development-workflows/)
 
 ## License

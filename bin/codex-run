@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# codex-run — run a task on OpenAI Codex (GPT-5 family) via the Codex CLI and
+# print ONLY Codex's final answer on stdout. Uses your existing `codex login`
+# (ChatGPT plan); no OPENAI_API_KEY required.
+#
+# Usage:
+#   codex-run [options] "<task>"
+#   <something> | codex-run [options] -        # read the task from stdin
+#
+# Options:
+#   -C, --cd <dir>       Working directory for Codex        (default: cwd)
+#   -s, --sandbox <mode> read-only | workspace-write | danger-full-access
+#                                                            (default: read-only)
+#   -m, --model <name>   Model override, e.g. gpt-5-codex
+#   -r, --resume         Continue the previous codex session instead of a new one
+#       --schema <file>  Constrain the final answer to a JSON Schema file
+#       --raw            Also emit Codex's full event log to stderr
+#       --timeout <sec>  Abort after N seconds                (default: 900)
+#
+# Output: Codex's final message on stdout.
+# Exit:   0 ok | 1 usage/precondition | 2 codex failed | 124 timed out.
+
+set -uo pipefail
+
+err() { printf 'codex-run: %s\n' "$*" >&2; }
+
+usage() {
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  exit 1
+}
+
+WORKDIR="$(pwd)"
+SANDBOX="read-only"
+MODEL=""
+RESUME=0
+SCHEMA=""
+RAW=0
+TIMEOUT=900
+TASK=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -C|--cd)       WORKDIR="${2:-}"; shift 2 ;;
+    -s|--sandbox)  SANDBOX="${2:-}"; shift 2 ;;
+    -m|--model)    MODEL="${2:-}"; shift 2 ;;
+    -r|--resume)   RESUME=1; shift ;;
+    --schema)      SCHEMA="${2:-}"; shift 2 ;;
+    --raw)         RAW=1; shift ;;
+    --timeout)     TIMEOUT="${2:-}"; shift 2 ;;
+    -h|--help)     usage ;;
+    -)             TASK="$(cat)"; shift ;;
+    -*)            err "unknown option: $1"; usage ;;
+    *)             TASK="$1"; shift ;;
+  esac
+done
+
+[ -n "$TASK" ] || { err "no task given"; usage; }
+
+case "$SANDBOX" in
+  read-only|workspace-write|danger-full-access) : ;;
+  *) err "invalid sandbox '$SANDBOX' (read-only | workspace-write | danger-full-access)"; exit 1 ;;
+esac
+
+# --- Preconditions -----------------------------------------------------------
+if ! command -v codex >/dev/null 2>&1; then
+  err "codex CLI not found on PATH. Install it ('npm i -g @openai/codex' or 'brew install codex') then run 'codex login'."
+  exit 1
+fi
+
+if ! codex login status 2>/dev/null | grep -qi 'logged in'; then
+  err "codex is not logged in. Run 'codex login' in a terminal, then retry."
+  exit 1
+fi
+
+if [ ! -d "$WORKDIR" ]; then
+  err "working directory does not exist: $WORKDIR"
+  exit 1
+fi
+WORKDIR="$(cd "$WORKDIR" && pwd)"
+
+if [ -n "$SCHEMA" ] && [ ! -f "$SCHEMA" ]; then
+  err "schema file not found: $SCHEMA"
+  exit 1
+fi
+
+# --- Assemble the command ----------------------------------------------------
+ANSWER_FILE="$(mktemp -t codex-run-answer.XXXXXX)"
+LOG_FILE="$(mktemp -t codex-run-log.XXXXXX)"
+cleanup() { rm -f "$ANSWER_FILE" "$LOG_FILE"; }
+trap cleanup EXIT
+
+CMD=(codex exec)
+[ "$RESUME" -eq 1 ] && CMD+=(resume --last)
+CMD+=(-C "$WORKDIR" -s "$SANDBOX" --skip-git-repo-check -o "$ANSWER_FILE")
+[ -n "$MODEL" ]  && CMD+=(-m "$MODEL")
+[ -n "$SCHEMA" ] && CMD+=(--output-schema "$SCHEMA")
+CMD+=("$TASK")
+
+# `timeout` is GNU coreutils; on macOS it may be absent or named gtimeout.
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="gtimeout"
+fi
+
+if [ -n "$TIMEOUT_BIN" ]; then
+  "$TIMEOUT_BIN" "$TIMEOUT" "${CMD[@]}" >"$LOG_FILE" 2>&1
+  STATUS=$?
+else
+  "${CMD[@]}" >"$LOG_FILE" 2>&1
+  STATUS=$?
+fi
+
+[ "$RAW" -eq 1 ] && cat "$LOG_FILE" >&2
+
+if [ "$STATUS" -eq 124 ]; then
+  err "codex timed out after ${TIMEOUT}s. Narrow the task or raise --timeout."
+  exit 124
+fi
+
+# --- Emit the final answer ---------------------------------------------------
+if [ -s "$ANSWER_FILE" ]; then
+  cat "$ANSWER_FILE"
+  exit 0
+fi
+
+if [ "$STATUS" -eq 0 ] && [ -s "$LOG_FILE" ]; then
+  # Older codex builds may ignore -o; fall back to the raw transcript.
+  err "note: codex produced no -o answer file; returning its raw output instead."
+  cat "$LOG_FILE"
+  exit 0
+fi
+
+err "codex failed (exit ${STATUS}). Last 30 lines of its output:"
+tail -n 30 "$LOG_FILE" >&2
+exit 2

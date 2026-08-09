@@ -1,6 +1,6 @@
 {
   "name": "codex-bridge",
-  "description": "Use your Codex CLI (ChatGPT) login from Claude Code: gpt-image-2 image generation plus a Codex second-opinion subagent.",
+  "description": "Image generation and GPT-5 subagents for Claude Code, powered by your existing Codex CLI login.",
   "owner": {
     "name": "Sateezg",
     "url": "https://github.com/Sateezg"
@@ -9,8 +9,8 @@
     {
       "name": "codex-bridge",
       "source": "./",
-      "description": "Generate images with OpenAI gpt-image-2 and delegate coding tasks to Codex (GPT-5), all through your existing Codex CLI ChatGPT login. No OpenAI API key required.",
-      "version": "1.0.0",
+      "description": "Give Claude Code image generation (gpt-image-2) and a team of GPT-5 subagents for review, debugging, and bulk implementation - all through your existing Codex CLI ChatGPT login. Heavy work runs on your ChatGPT quota instead of your Claude context. No OpenAI API key required.",
+      "version": "1.1.0",
       "author": {
         "name": "Sateezg",
         "url": "https://github.com/Sateezg"
@@ -23,9 +23,11 @@
         "codex",
         "image-generation",
         "gpt-image-2",
-        "openai",
+        "gpt-5",
         "subagent",
-        "design"
+        "openai",
+        "code-review",
+        "token-savings"
       ]
     }
   ]
