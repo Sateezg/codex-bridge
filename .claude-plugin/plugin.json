@@ -1,0 +1,19 @@
+{
+  "name": "codex-bridge",
+  "description": "Use your Codex CLI (ChatGPT) login from Claude Code: generate images with gpt-image-2 via the $imagegen skill, and delegate coding tasks to Codex as a second-opinion subagent. No OpenAI API key required.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Sateezg",
+    "url": "https://github.com/Sateezg"
+  },
+  "homepage": "https://github.com/Sateezg/codex-bridge",
+  "repository": "https://github.com/Sateezg/codex-bridge",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "image-generation",
+    "gpt-image-2",
+    "subagent",
+    "openai"
+  ]
+}

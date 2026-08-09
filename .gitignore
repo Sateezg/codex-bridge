@@ -1,0 +1,9 @@
+.DS_Store
+*.swp
+node_modules/
+*.log
+
+# Generated images should not be committed
+generated_images/
+*.png
+!docs/**/*.png

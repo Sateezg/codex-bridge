@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# codex-imagegen — generate an image with OpenAI gpt-image-2 through the Codex CLI,
+# using your existing `codex login` (ChatGPT plan). No OPENAI_API_KEY required.
+#
+# Usage:
+#   codex-imagegen "<prompt>" <output-path.png> [--size WxH] [--model MODEL]
+#
+# Examples:
+#   codex-imagegen "flat vector icon of a rocket, blue gradient" ./assets/rocket.png
+#   codex-imagegen "photorealistic mountain lake at dawn" /tmp/lake.png --size 1536x1024
+#
+# Exit codes: 0 = image written, 1 = usage/precondition error, 2 = generation failed.
+
+set -euo pipefail
+
+err() { printf 'codex-imagegen: %s\n' "$*" >&2; }
+
+# mtime <file> — GNU stat first (Linux), BSD stat fallback (macOS)
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+
+usage() {
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  exit 1
+}
+
+[ $# -ge 2 ] || usage
+
+PROMPT="$1"; shift
+OUTPUT="$1"; shift
+SIZE=""
+MODEL=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --size)  SIZE="${2:-}"; shift 2 ;;
+    --model) MODEL="${2:-}"; shift 2 ;;
+    -h|--help) usage ;;
+    *) err "unknown argument: $1"; usage ;;
+  esac
+done
+
+[ -n "$PROMPT" ] || { err "prompt is empty"; exit 1; }
+[ -n "$OUTPUT" ] || { err "output path is empty"; exit 1; }
+
+# --- Preconditions -----------------------------------------------------------
+if ! command -v codex >/dev/null 2>&1; then
+  err "codex CLI not found on PATH. Install it (e.g. 'npm i -g @openai/codex' or 'brew install codex') and run 'codex login'."
+  exit 1
+fi
+
+if ! codex login status 2>/dev/null | grep -qi 'logged in'; then
+  err "codex is not logged in. Run 'codex login' first (ChatGPT Plus/Pro/Team plan works; no API key needed)."
+  exit 1
+fi
+
+# --- Resolve output path -----------------------------------------------------
+case "$OUTPUT" in
+  /*) : ;;                       # already absolute
+  *)  OUTPUT="$(pwd)/$OUTPUT" ;; # make absolute against caller's cwd
+esac
+
+OUTDIR="$(dirname "$OUTPUT")"
+BASENAME="$(basename "$OUTPUT")"
+mkdir -p "$OUTDIR"
+OUTDIR="$(cd "$OUTDIR" && pwd)"   # normalize (collapse ./ and symlinked segments)
+OUTPUT="$OUTDIR/$BASENAME"
+
+# --- Build the instruction for Codex ----------------------------------------
+# Note: \$imagegen must reach Codex literally — it names Codex's built-in
+# image-generation skill.
+INSTRUCTION="Use the \$imagegen image generation tool to generate exactly one image and save it to ./${BASENAME} in the current working directory, overwriting any existing file. Do nothing else: no code changes, no extra files, no questions. Image description: ${PROMPT}"
+if [ -n "$SIZE" ]; then
+  INSTRUCTION="${INSTRUCTION} Desired image size: ${SIZE}."
+fi
+
+MODEL_ARGS=()
+if [ -n "$MODEL" ]; then
+  MODEL_ARGS=(-m "$MODEL")
+fi
+
+START_EPOCH="$(date +%s)"
+
+# --- Run Codex non-interactively ---------------------------------------------
+set +e
+CODEX_OUT="$(codex exec -C "$OUTDIR" -s workspace-write --skip-git-repo-check "${MODEL_ARGS[@]}" "$INSTRUCTION" 2>&1)"
+CODEX_STATUS=$?
+set -e
+
+# --- Verify the file landed where we asked -----------------------------------
+if [ -s "$OUTPUT" ]; then
+  printf '%s\n' "$OUTPUT"
+  exit 0
+fi
+
+# Fallback: Codex sometimes drops images into $CODEX_HOME/generated_images
+# instead of the workspace. Grab the newest image created after we started.
+GEN_DIR="${CODEX_HOME:-$HOME/.codex}/generated_images"
+if [ -d "$GEN_DIR" ]; then
+  NEWEST=""
+  NEWEST_MTIME=0
+  for f in "$GEN_DIR"/*; do
+    [ -f "$f" ] || continue
+    MTIME="$(mtime "$f")"
+    if [ "$MTIME" -ge "$START_EPOCH" ] && [ "$MTIME" -gt "$NEWEST_MTIME" ]; then
+      NEWEST="$f"
+      NEWEST_MTIME="$MTIME"
+    fi
+  done
+  if [ -n "$NEWEST" ]; then
+    cp "$NEWEST" "$OUTPUT"
+    printf '%s\n' "$OUTPUT"
+    exit 0
+  fi
+fi
+
+err "image was not produced (codex exit code: ${CODEX_STATUS})."
+err "--- codex output (last 30 lines) ---"
+printf '%s\n' "$CODEX_OUT" | tail -n 30 >&2
+exit 2
