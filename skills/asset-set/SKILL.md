@@ -56,9 +56,10 @@ magick master.png -define icon:auto-resize=16,32,48,64 favicon.ico
 **Web favicon set** — master at 1024x1024, then derive `favicon.ico` (16/32/48),
 `favicon-32x32.png`, `apple-touch-icon.png` (180x180), `icon-192.png`, `icon-512.png`.
 
-**Social / OG card** — generate at 1536x1024, resample to 1200x630. Leave the
-centre clear if a title will be overlaid; ask whether text should be baked in
-(gpt-image-2 renders text reliably, but baked text can't be localised later).
+**Social / OG card** — generate at 1536x1024, resample to 1200x630 (1200x630 isn't
+directly generatable: 630 is not a multiple of 16). Leave the centre clear if a
+title will be overlaid; ask whether text should be baked in — text renders
+reliably, but baked text can't be localised later.
 
 **iOS / Android app icon** — master at 1024x1024, no transparency, no rounded
 corners (the OS masks them), subject centred with ~10% safe margin.
@@ -79,6 +80,13 @@ whitespace so copy can sit alongside.
    and spends real ChatGPT quota. Say the expected count before you start and let
    the user trim the list.
 4. Use a Bash timeout of at least 300000 ms per generation.
+5. **Only certain sizes are generatable**: longest edge ≤ 3840, both edges
+   multiples of 16, ratio ≤ 3:1, total pixels 655,360–8,294,400. Every standard
+   icon size (16, 32, 180, 192, 512) is below that floor — which is exactly why
+   you generate one large master and resample.
+6. **Use the path the wrapper prints.** Codex avoids overwriting existing files and
+   may write a versioned sibling (`icon-v2.png`); the wrapper detects that and
+   reports the real path.
 
 For sets larger than about four images, hand the whole brief to the `codex-artist`
 subagent so the generation loop stays out of the main conversation.

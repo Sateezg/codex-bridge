@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.1
+
+Fixes found by running the real thing on a real machine rather than trusting the
+blog posts.
+
+- **`codex-imagegen` missed images saved to the default location.** Codex's
+  built-in image tool writes to
+  `$CODEX_HOME/generated_images/<session-id>/exec-<uuid>.png` — nested one level
+  under a session directory. The fallback scan only looked at the top level, so it
+  reported failure whenever Codex didn't honour the requested path. Now searches
+  session subdirectories too.
+- **Handles Codex's no-overwrite policy.** Codex's `imagegen` skill is instructed
+  not to overwrite existing assets and to write a versioned sibling instead
+  (`out-v2.png`). The wrapper now explicitly authorizes in-place replacement, and
+  if Codex still versions the file, detects the sibling and reports its real path.
+- **Validates PNG magic bytes** instead of just checking the file is non-empty, so
+  a truncated or placeholder file is no longer reported as success.
+- **Corrected size documentation.** Real constraints are: longest edge ≤ 3840px,
+  both edges multiples of 16, ratio ≤ 3:1, total pixels 655,360–8,294,400. 4K
+  (`3840x2160`) is properly supported, not "beta" as previously documented.
+- **Corrected transparency guidance.** Replaces the ImageMagick advice with the
+  `remove_chroma_key.py` helper Codex actually ships, and documents that true
+  native transparency is available via Codex's CLI fallback with an
+  `OPENAI_API_KEY` — presented as a user choice, not an automatic downgrade.
+- Troubleshooting entries for the `base_instructions` models-cache warning and for
+  unrelated MCP/hook noise in Codex output.
+
 ## 1.1.0
 
 Turns the Codex side from a single "second opinion" agent into a proper delegation

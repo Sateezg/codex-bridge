@@ -18,8 +18,14 @@ Prints the absolute path of the written PNG. Run every call with a Bash timeout 
 at least 300000 ms — each image takes 1–4 minutes. `--ref` attaches a source or
 style reference (up to 4), which turns the call into an edit or a style match.
 
-Sizes: `1024x1024` (default), `1536x1024`, `1024x1536`; up to 2048x2048 stable.
-Only pass `--size` when the aspect ratio matters.
+Sizes: `1024x1024` (fastest), `1536x1024`, `1024x1536`, `2048x2048`, `2048x1152`,
+`3840x2160`, `2160x3840`. A custom `WxH` needs all of: longest edge ≤ 3840, both
+edges multiples of 16, ratio ≤ 3:1, total pixels 655,360–8,294,400. Only pass
+`--size` when the aspect ratio matters.
+
+The wrapper prints the path actually written. Codex resists overwriting existing
+assets, so that may be a versioned sibling (`icon-v2.png`) — always use the
+printed path downstream, never the one you requested.
 
 ## Workflow
 
@@ -48,9 +54,16 @@ Only pass `--size` when the aspect ratio matters.
 
 ## Hard rules
 
-- **Transparency is unsupported.** For transparent assets, generate on solid
-  `#00FF00` and cut it out:
-  `magick in.png -fuzz 8% -transparent '#00FF00' out.png`
+- **Transparent assets** need a two-step: generate on a flat solid `#00FF00`
+  background (`#FF00FF` if the subject is green), then strip the key with Codex's
+  own helper and verify transparent corners plus no colour fringe:
+  ```bash
+  python "${CODEX_HOME:-$HOME/.codex}/skills/.system/imagegen/scripts/remove_chroma_key.py" \
+    --input keyed.png --out final.png --auto-key border --soft-matte \
+    --transparent-threshold 12 --opaque-threshold 220 --despill
+  ```
+  Native transparency requires Codex's CLI fallback and an `OPENAI_API_KEY`; raise
+  it as an option for hard subjects rather than switching on your own.
 - **Never overwrite a source image** when editing — always write a new file.
 - **State the count before a big run.** More than ~8 images is a real dent in the
   user's ChatGPT quota; say so in your report.

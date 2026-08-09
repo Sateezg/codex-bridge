@@ -125,10 +125,14 @@ codex-imagegen "settings gear, same style as the reference" ./settings.png --ref
 
 | Option | |
 | :-- | :-- |
-| `--size WxH` | `1024x1024` (default), `1536x1024`, `1024x1536`; ≤2048x2048 stable |
+| `--size WxH` | `1024x1024`, `1536x1024`, `1024x1536`, `2048x2048`, `3840x2160`, … — see note below |
 | `--ref <file>` | source or style reference, repeatable up to 4 — turns the call into an edit |
 | `--model <name>` | model override |
 | `--timeout <sec>` | default 600 |
+
+A custom size is only accepted if all of these hold: longest edge ≤ 3840px, both edges multiples of 16, long-to-short ratio ≤ 3:1, total pixels between 655,360 and 8,294,400. Square is fastest. For anything outside that — favicons, a 1200×630 OG card — generate a large master and resample locally.
+
+The wrapper prints the path it actually wrote. Codex is instructed not to overwrite existing assets, so it occasionally saves `out-v2.png`; the wrapper detects that (and the `~/.codex/generated_images/<session>/` default location) and reports the real path.
 
 What makes this better than pasting prompts into a chat window: the skills teach Claude to pull your **actual palette** out of `tailwind.config.*` or your design tokens, to reuse one style contract across a whole set so the assets match, to derive size variants with ImageMagick instead of regenerating, and to **open the PNG and check it** before telling you it's done.
 
@@ -192,7 +196,7 @@ Both fail fast and loudly: a missing `codex` binary or a logged-out session exit
 ## Limitations
 
 - **Quota, not free.** Image turns burn ChatGPT plan quota roughly 3–5× faster than text turns. Set `OPENAI_API_KEY` and Codex switches to API billing instead.
-- **No transparent backgrounds** — gpt-image-2 doesn't support them. The skills use a chroma-key workaround: generate on solid `#00FF00`, then `magick in.png -fuzz 8% -transparent '#00FF00' out.png`.
+- **Transparency takes two steps.** The default path can't emit alpha, so the skills generate on a flat `#00FF00` key and strip it with the `remove_chroma_key.py` helper Codex already ships. True native transparency needs Codex's CLI fallback plus an `OPENAI_API_KEY`; the skills surface that as a choice rather than switching silently.
 - **Slow.** 1–4 minutes per image; a repo-wide Codex task can take 10+ minutes. Skills set long Bash timeouts accordingly.
 - **Codex is blind to your conversation.** Every brief has to stand alone. This is exactly why the subagents verify before reporting.
 - **macOS and Linux.** Not tested on Windows.
@@ -204,7 +208,10 @@ Both fail fast and loudly: a missing `codex` binary or a logged-out session exit
 | `codex CLI not found on PATH` | install Codex CLI, then reopen your shell |
 | `codex is not logged in` | run `codex login`; confirm with `codex login status` |
 | `Operation not permitted` from codex | ownership on `~/.codex` — `sudo chown -R $(whoami) ~/.codex` |
-| Image lands somewhere unexpected | the wrapper checks `$CODEX_HOME/generated_images/`; pass an absolute output path |
+| Got `out-v2.png` instead of `out.png` | expected — Codex won't overwrite; use the path the wrapper printed |
+| Image lands somewhere unexpected | the wrapper also checks `$CODEX_HOME/generated_images/<session>/`; pass an absolute output path |
+| `failed to load models cache: missing field base_instructions` | harmless Codex cache warning; clear it with `rm -rf ~/.codex/cache` if it persists |
+| Codex output full of MCP/hook errors | your Codex config, not this plugin — the wrapper ignores them. Prune unused MCP servers in `~/.codex/config.toml` to speed runs up |
 | Skills don't show up | `/reload-plugins`, then `/help` → Custom commands |
 | Wrapper "permission denied" | `chmod +x ~/.claude/skills/codex-bridge/bin/*` |
 | Everything times out | raise `--timeout`; check `codex exec -C . -s read-only "say hi"` works standalone |
@@ -221,6 +228,7 @@ bash -n bin/codex-imagegen && bash -n bin/codex-run
 ## Credits
 
 - [openai/codex](https://github.com/openai/codex) — the Codex CLI and its `$imagegen` skill
+- [oakplank/gpt-image-bridge](https://github.com/oakplank/gpt-image-bridge) — the original codex-CLI image bridge idea
 - [Codex CLI image generation write-up](https://codex.danielvaughan.com/2026/04/27/codex-cli-image-generation-gpt-image-2-visual-development-workflows/)
 
 ## License

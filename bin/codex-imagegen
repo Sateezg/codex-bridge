@@ -94,10 +94,12 @@ OUTPUT="$OUTDIR/$BASENAME"
 # --- Build the instruction for Codex -----------------------------------------
 # Note: \$imagegen must reach Codex literally — it names Codex's built-in
 # image-generation skill.
+SAVE_RULE="Save the final image to the exact path ./${BASENAME} in the current working directory. I explicitly authorize replacing any existing file at that path, so overwrite it in place - do NOT create a versioned sibling filename such as ${BASENAME%.*}-v2.${BASENAME##*.}. Do nothing else: no code changes, no extra files, no questions, no commentary."
+
 if [ "${#REFS[@]}" -gt 0 ]; then
-  INSTRUCTION="Use the \$imagegen image generation tool to edit the attached reference image(s) and save the result to ./${BASENAME} in the current working directory, overwriting any existing file. Preserve everything not mentioned in the change description. Do nothing else: no code changes, no extra files, no questions. Change to make: ${PROMPT}"
+  INSTRUCTION="Use the \$imagegen image generation tool to edit the attached reference image(s). Preserve everything not mentioned in the change description. ${SAVE_RULE} Change to make: ${PROMPT}"
 else
-  INSTRUCTION="Use the \$imagegen image generation tool to generate exactly one image and save it to ./${BASENAME} in the current working directory, overwriting any existing file. Do nothing else: no code changes, no extra files, no questions. Image description: ${PROMPT}"
+  INSTRUCTION="Use the \$imagegen image generation tool to generate exactly one image. ${SAVE_RULE} Image description: ${PROMPT}"
 fi
 if [ -n "$SIZE" ]; then
   INSTRUCTION="${INSTRUCTION} Desired image size: ${SIZE}."
@@ -135,20 +137,48 @@ if [ "$CODEX_STATUS" -eq 124 ]; then
   exit 124
 fi
 
-# --- Verify the file landed where we asked -----------------------------------
-if [ -s "$OUTPUT" ]; then
+# --- Locate the result -------------------------------------------------------
+# Three places to look, in order of preference:
+#   1. exactly where we asked
+#   2. a sibling versioned name — Codex's imagegen skill is instructed not to
+#      overwrite existing assets and may write e.g. out-v2.png / out-edited.png
+#   3. $CODEX_HOME/generated_images/<session-id>/*.png — the built-in image_gen
+#      tool's default destination, nested one level under a session directory
+
+is_png() { [ -s "$1" ] && [ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' \n')" = "89504e47" ]; }
+
+if is_png "$OUTPUT"; then
   printf '%s\n' "$OUTPUT"
   exit 0
 fi
 
-# Fallback: Codex sometimes drops images into $CODEX_HOME/generated_images
-# instead of the workspace. Grab the newest image created after we started.
+STEM="${BASENAME%.*}"
+EXT="${BASENAME##*.}"
+FOUND=""
+FOUND_MTIME=0
+for cand in "$OUTDIR/$STEM"-*."$EXT"; do
+  [ -f "$cand" ] || continue
+  is_png "$cand" || continue
+  CM="$(mtime "$cand")"
+  if [ "$CM" -ge "$START_EPOCH" ] && [ "$CM" -gt "$FOUND_MTIME" ]; then
+    FOUND="$cand"
+    FOUND_MTIME="$CM"
+  fi
+done
+if [ -n "$FOUND" ]; then
+  err "note: codex wrote '$(basename "$FOUND")' instead of '$BASENAME' (it avoids overwriting); using it."
+  printf '%s\n' "$FOUND"
+  exit 0
+fi
+
 GEN_DIR="${CODEX_HOME:-$HOME/.codex}/generated_images"
 if [ -d "$GEN_DIR" ]; then
   NEWEST=""
   NEWEST_MTIME=0
-  for f in "$GEN_DIR"/*; do
+  # Search the session subdirectories and the top level (older layouts).
+  for f in "$GEN_DIR"/*/* "$GEN_DIR"/*; do
     [ -f "$f" ] || continue
+    is_png "$f" || continue
     MTIME="$(mtime "$f")"
     if [ "$MTIME" -ge "$START_EPOCH" ] && [ "$MTIME" -gt "$NEWEST_MTIME" ]; then
       NEWEST="$f"
@@ -163,6 +193,7 @@ if [ -d "$GEN_DIR" ]; then
 fi
 
 err "image was not produced (codex exit code: ${CODEX_STATUS})."
+err "looked in: $OUTPUT , ${OUTDIR}/${STEM}-*.${EXT} , ${GEN_DIR}/*/*"
 err "--- codex output (last 30 lines) ---"
 printf '%s\n' "$CODEX_OUT" | tail -n 30 >&2
 exit 2

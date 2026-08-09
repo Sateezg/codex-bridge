@@ -47,14 +47,24 @@ For a series of edits, chain them one at a time (each output becomes the next
 ## Rules
 
 1. **Never overwrite the source.** Write to a new file; offer to replace only after
-   the user has seen the result.
+   the user has seen the result. Note that Codex itself resists overwriting — the
+   wrapper prints the path actually written, which may be a versioned sibling like
+   `out-v2.png`. Use the printed path, not the one you asked for.
 2. **Verify by viewing.** Read the output PNG with the Read tool and compare
    against the request before reporting done. Regenerate with a sharper prompt if
    the model drifted — at most 2 retries.
 3. **Use a Bash timeout of at least 300000 ms** (5 minutes).
-4. **Transparency is not supported.** For a transparent result, ask for a solid
-   `#00FF00` background and cut it out:
-   `magick in.png -fuzz 8% -transparent '#00FF00' out.png`
+4. **For a transparent result**, regenerate the subject on a flat `#00FF00`
+   background (`#FF00FF` if the subject is green) and strip the key with the
+   helper Codex ships:
+   ```bash
+   python "${CODEX_HOME:-$HOME/.codex}/skills/.system/imagegen/scripts/remove_chroma_key.py" \
+     --input ./keyed.png --out ./final.png --auto-key border --soft-matte \
+     --transparent-threshold 12 --opaque-threshold 220 --despill
+   ```
+   Verify transparent corners and no colour fringe afterwards. True native
+   transparency needs Codex's CLI fallback plus an `OPENAI_API_KEY` — only raise
+   that option for hard subjects (hair, fur, glass, smoke) and let the user decide.
 5. **Not for precise pixel work.** Cropping, resizing, rotating, format conversion
    and compression are faster and lossless with ImageMagick or `sips` — use those
    directly instead of regenerating.

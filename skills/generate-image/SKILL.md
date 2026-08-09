@@ -34,10 +34,16 @@ gpt-image-2 renders text with high accuracy, so quote the exact string you want:
 
 ## Sizes
 
-`1024x1024` (default), `1536x1024` (landscape), `1024x1536` (portrait). Up to
-2048x2048 is stable; 4K is beta and unreliable. Omit `--size` unless the aspect
-ratio matters. To get other dimensions, generate the nearest supported size and
-resample locally with ImageMagick — don't regenerate.
+Common values: `1024x1024` (square, fastest), `1536x1024` (landscape),
+`1024x1536` (portrait), `2048x2048` (2K square), `2048x1152` (2K landscape),
+`3840x2160` (4K landscape), `2160x3840` (4K portrait).
+
+A custom `WxH` is valid only if **every** constraint holds: longest edge
+≤ 3840px, both edges multiples of 16, long-to-short ratio ≤ 3:1, and total pixels
+between 655,360 and 8,294,400. Anything else will be rejected or silently
+adjusted — pick the nearest listed size and resample locally instead.
+
+Omit `--size` unless the aspect ratio actually matters; square is fastest.
 
 ## Rules
 
@@ -51,14 +57,38 @@ resample locally with ImageMagick — don't regenerate.
 5. **Never invent a brand.** If the user has a logo, palette, or existing assets,
    find them first and match them.
 
+## Transparent backgrounds
+
+The default image path can't emit alpha directly, so ask for a flat chroma-key
+background and remove it afterwards with the helper Codex already ships:
+
+```bash
+codex-imagegen "<subject> on a perfectly flat solid #00FF00 chroma-key background, one uniform colour, no shadows, gradients, reflections or floor plane, crisp edges, generous padding, do not use #00FF00 anywhere in the subject" ./tmp-key.png
+
+python "${CODEX_HOME:-$HOME/.codex}/skills/.system/imagegen/scripts/remove_chroma_key.py" \
+  --input ./tmp-key.png --out ./final.png \
+  --auto-key border --soft-matte --transparent-threshold 12 \
+  --opaque-threshold 220 --despill
+```
+
+Use `#FF00FF` instead when the subject is green. Then check the result actually
+has transparent corners and no colour fringe; retry once with `--edge-contract 1`
+if a thin fringe remains.
+
+True model-native transparency exists but needs Codex's CLI fallback
+(`gpt-image-1.5 --background transparent`), which requires an `OPENAI_API_KEY`.
+Only mention that route if chroma-keying fails or the subject is genuinely hard
+(hair, fur, smoke, glass, liquid, reflections) — and let the user decide.
+
 ## Limitations
 
-- **No transparent backgrounds.** Generate on a solid uncommon colour and cut it
-  out: `magick in.png -fuzz 8% -transparent '#00FF00' out.png`.
 - Generation spends the user's **ChatGPT plan quota** (image turns cost roughly
   3–5x a text turn). Don't fire off batches without saying how many first.
 - If the wrapper reports "codex is not logged in", tell the user to run
   `codex login` in a terminal — don't try to work around auth yourself.
+- Codex avoids overwriting existing assets. The wrapper explicitly authorizes
+  replacement and detects a versioned sibling (`out-v2.png`) if Codex writes one
+  anyway — trust the path the wrapper prints, not the one you asked for.
 
 ## Related
 
