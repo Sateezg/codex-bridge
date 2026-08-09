@@ -67,7 +67,7 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! codex login status 2>/dev/null | grep -qi 'logged in'; then
+if ! codex login status >/dev/null 2>&1; then
   err "codex is not logged in. Run 'codex login' in a terminal, then retry."
   exit 1
 fi
@@ -94,7 +94,8 @@ CMD=(codex exec)
 CMD+=(-C "$WORKDIR" -s "$SANDBOX" --skip-git-repo-check -o "$ANSWER_FILE")
 [ -n "$MODEL" ]  && CMD+=(-m "$MODEL")
 [ -n "$SCHEMA" ] && CMD+=(--output-schema "$SCHEMA")
-CMD+=("$TASK")
+# `--` so a task that starts with a dash is never parsed as a codex flag.
+CMD+=(-- "$TASK")
 
 # `timeout` is GNU coreutils; on macOS it may be absent or named gtimeout.
 TIMEOUT_BIN=""

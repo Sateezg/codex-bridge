@@ -6,7 +6,9 @@
 #   codex-imagegen "<prompt>" <output.png> [options]
 #
 # Options:
-#   --size WxH        1024x1024 (default) | 1536x1024 | 1024x1536 | up to 2048x2048
+#   --size WxH        1024x1024 (default) | 1536x1024 | 1024x1536 | 1280x640 | 3840x2160
+#                     Custom sizes: longest edge <= 3840, both edges multiples of
+#                     16, ratio <= 3:1, total pixels 655,360-8,294,400.
 #   --ref <file>      Source/reference image. Repeatable (max 4). Passing a --ref
 #                     turns this into an EDIT: describe the change in the prompt.
 #   --model <name>    Model override passed to codex
@@ -66,7 +68,7 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! codex login status 2>/dev/null | grep -qi 'logged in'; then
+if ! codex login status >/dev/null 2>&1; then
   err "codex is not logged in. Run 'codex login' in a terminal, then retry. (ChatGPT Plus/Pro/Team works; no API key needed.)"
   exit 1
 fi
@@ -112,7 +114,10 @@ for r in "${REFS[@]:-}"; do
   case "$r" in /*) ABS="$r" ;; *) ABS="$(cd "$(dirname "$r")" && pwd)/$(basename "$r")" ;; esac
   CMD+=(-i "$ABS")
 done
-CMD+=("$INSTRUCTION")
+# `--` is required, not cosmetic: codex's `-i/--image <FILE>...` is variadic, so
+# without it the instruction is parsed as one more image filename and the prompt
+# positional ends up empty (codex then blocks reading it from stdin).
+CMD+=(-- "$INSTRUCTION")
 
 START_EPOCH="$(date +%s)"
 

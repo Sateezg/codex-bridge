@@ -7,3 +7,9 @@ node_modules/
 generated_images/
 *.png
 !docs/**/*.png
+# ...except the README's demo assets, which are deliberately checked in.
+# See assets/README.md for the commands that produced them.
+!assets/*.png
+
+# VHS intermediate — the committed demo.gif is the sped-up version
+assets/demo-raw.gif
